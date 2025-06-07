@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Маршрутизация на улично-дорожной сети</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v7.3.0/ol.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+            color: #007bff;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .input-group label {
+            width: 200px;
+            font-weight: bold;
+            color: #555;
+        }
+        .input-group input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .input-group input:focus {
+            border-color: #007bff;
+            outline: none;
+            box-shadow: 0 0 5px rgba(0,123,255,0.5);
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: #007bff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 18px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #map {
+            height: 500px;
+            margin-top: 20px;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f9f9f9;
+            text-align: center;
+            font-size: 16px;
+        }
+        #status.waiting {
+            background-color: #e4901a;
+        }
+        #status.success {
+            background-color: #4caf50;
+            color: white;
+        }
+        #status.error {
+            background-color: #f44336;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Маршрутизация на улично-дорожной сети</h1>
+        <div class="input-group">
+            <label for="start_lat">Широта начальной точки:</label>
+            <input type="text" id="start_lat" value="55.737917" placeholder="Например, 55.810208">
+        </div>
+        <div class="input-group">
+            <label for="start_lon">Долгота начальной точки:</label>
+            <input type="text" id="start_lon" value="37.414975" placeholder="Например, 37.498321">
+        </div>
+        <div class="input-group">
+            <label for="target_lat">Широта конечной точки:</label>
+            <input type="text" id="target_lat" value="55.896571" placeholder="Например, 55.739727">
+        </div>
+        <div class="input-group">
+            <label for="target_lon">Долгота конечной точки:</label>
+            <input type="text" id="target_lon" value="37.698518" placeholder="Например, 37.408067">
+        </div>
+        <button onclick="calculateRoute()">Запустить</button>
+        <div id="status"></div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ol@v7.3.0/dist/ol.js"></script>
+    <script>
+
+        const map = new ol.Map({
+            target: 'map',
+            layers: [
+                new ol.layer.Tile({
+                    source: new ol.source.OSM({
+                        url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        attributions: 'Map data © <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors'
+                    })
+                })
+            ],
+            view: new ol.View({
+                center: ol.proj.fromLonLat([37.6173, 55.7558]),
+                zoom: 10
+            })
+        });
+
+        let routeLayer = null;
+        const statusDiv = document.getElementById('status');
+
+        function calculateRoute() {
+            const start_lat = parseFloat(document.getElementById('start_lat').value);
+            const start_lon = parseFloat(document.getElementById('start_lon').value);
+            const target_lat = parseFloat(document.getElementById('target_lat').value);
+            const target_lon = parseFloat(document.getElementById('target_lon').value);
+
+            if (isNaN(start_lat) || isNaN(start_lon) || isNaN(target_lat) || isNaN(target_lon)) {
+                statusDiv.innerText = "Пожалуйста, введите корректные координаты.";
+                statusDiv.className = "error";
+                return;
+            }
+
+
+            statusDiv.innerText = "Обработка запроса. Пожалуйста, подождите...";
+            statusDiv.className = "waiting";
+
+            fetch('/find_route', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    start_lat: start_lat,
+                    start_lon: start_lon,
+                    target_lat: target_lat,
+                    target_lon: target_lon
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+
+                    statusDiv.innerText = `Ошибка: ${data.error}`;
+                    statusDiv.className = "error";
+                } else {
+
+                    statusDiv.innerText = `Маршрут найден! Длина маршрута: ${data.length.toFixed(2)} метров`;
+                    statusDiv.className = "success";
+
+                    if (routeLayer) {
+                        map.removeLayer(routeLayer);
+                    }
+
+                    const path = data.path.map(coord => ol.proj.fromLonLat([coord[1], coord[0]]));
+
+                    routeLayer = new ol.layer.Vector({
+                        source: new ol.source.Vector({
+                            features: [
+                                new ol.Feature({
+                                    geometry: new ol.geom.LineString(path)
+                                })
+                            ]
+                        }),
+                        style: new ol.style.Style({
+                            stroke: new ol.style.Stroke({
+                                color: '#0000FF',
+                                width: 4
+                            })
+                        })
+                    });
+
+                    map.addLayer(routeLayer);
+
+                    const extent = routeLayer.getSource().getExtent();
+                    map.getView().fit(extent, { padding: [50, 50, 50, 50], maxZoom: 15 });
+                }
+            })
+            .catch(error => {
+
+                statusDiv.innerText = "Произошла ошибка при поиске маршрута";
+                statusDiv.className = "error";
+            });
+        }
+    </script>
+</body>
+</html>
